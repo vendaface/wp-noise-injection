@@ -1,0 +1,143 @@
+/* MacDoug Noise Injection — Admin Styles */
+
+.wni-wrap h1 {
+    margin-bottom: 16px;
+}
+
+/* Topic blocks */
+.wni-topic-block {
+    margin-bottom: 16px;
+}
+
+.wni-topic-label-input {
+    font-size: 14px;
+    font-weight: 600;
+    width: 340px;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+}
+
+.wni-topic-label-input:focus {
+    background: #fff;
+    border: 1px solid #2271b1;
+    box-shadow: 0 0 0 1px #2271b1;
+    padding: 2px 6px;
+}
+
+.wni-topic-table {
+    margin-top: 0;
+}
+
+.wni-seeds-textarea {
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* Generate page layout */
+.wni-generate-cols {
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+    margin-top: 16px;
+}
+
+.wni-generate-left {
+    flex: 1 1 55%;
+    min-width: 0;
+}
+
+.wni-generate-right {
+    flex: 1 1 40%;
+    min-width: 280px;
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    border-radius: 4px;
+    padding: 20px 24px;
+}
+
+.wni-score-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.wni-big-score {
+    font-size: 48px;
+    font-weight: 700;
+    line-height: 1;
+    color: #1d2327;
+}
+
+.wni-big-label {
+    font-size: 18px;
+    color: #646970;
+}
+
+/* Bar charts */
+.wni-bar-track {
+    background: #f0f0f1;
+    border-radius: 3px;
+    height: 10px;
+    width: 100%;
+    min-width: 80px;
+}
+
+.wni-bar-fill {
+    background: #2271b1;
+    border-radius: 3px;
+    height: 10px;
+    transition: width 0.3s ease;
+}
+
+.wni-breakdown-table td {
+    vertical-align: middle;
+}
+
+.wni-breakdown-table .wni-bar-track {
+    min-width: 120px;
+}
+
+/* Disabled topic rows */
+.wni-disabled {
+    opacity: 0.45;
+}
+
+/* Draft list */
+.wni-draft-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.wni-draft-list li {
+    padding: 6px 0;
+    border-bottom: 1px solid #f0f0f1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.wni-draft-list li:last-child {
+    border-bottom: none;
+}
+
+.wni-topic-tag {
+    display: inline-block;
+    background: #f0f0f1;
+    color: #50575e;
+    font-size: 11px;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-family: monospace;
+}
+
+.wni-draft-date {
+    color: #8c8f94;
+    font-size: 12px;
+    margin-left: auto;
+}
