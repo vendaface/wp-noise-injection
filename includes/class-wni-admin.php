@@ -14,6 +14,12 @@ class WNI_Admin {
         add_action( 'wp_ajax_wni_test_ai',            array( __CLASS__, 'ajax_test_ai' ) );
         add_action( 'wp_ajax_wni_generate_topics',    array( __CLASS__, 'ajax_generate_topics' ) );
         add_action( 'wp_ajax_wni_generate_seeds',     array( __CLASS__, 'ajax_generate_seeds' ) );
+        add_action( 'wp_ajax_wni_save_profile',       array( __CLASS__, 'ajax_save_profile' ) );
+        add_action( 'wp_ajax_wni_load_profile',       array( __CLASS__, 'ajax_load_profile' ) );
+        add_action( 'wp_ajax_wni_delete_profile',     array( __CLASS__, 'ajax_delete_profile' ) );
+        add_action( 'wp_ajax_wni_reset_token_usage',  array( __CLASS__, 'ajax_reset_token_usage' ) );
+        add_action( 'admin_post_wni_export_profile',  array( __CLASS__, 'handle_export_profile' ) );
+        add_action( 'admin_post_wni_import_profile',  array( __CLASS__, 'handle_import_profile' ) );
         add_action( 'admin_enqueue_scripts',          array( __CLASS__, 'enqueue_admin_assets' ) );
     }
 
@@ -59,6 +65,15 @@ class WNI_Admin {
                 'claude' => WNI_Settings::provider_default_model( 'claude' ),
                 'openai' => WNI_Settings::provider_default_model( 'openai' ),
             ),
+            'profileNonce'        => wp_create_nonce( 'wni_profile_action' ),
+            'exportNonce'         => wp_create_nonce( 'wni_export_profile' ),
+            'resetTokenNonce'     => wp_create_nonce( 'wni_reset_token_usage' ),
+            'adminPostUrl'        => admin_url( 'admin-post.php' ),
+            'settingsUrl'         => admin_url( 'admin.php?page=wni-settings' ),
+            'profiles'            => array_map(
+                function( $p ) { return array( 'id' => $p['id'], 'name' => $p['name'] ); },
+                WNI_Profiles::get_all()
+            ),
         ) );
     }
 
@@ -69,7 +84,11 @@ class WNI_Admin {
     public static function page_settings() {
         $settings = WNI_Settings::get();
         $users    = get_users( array( 'capability' => 'edit_posts' ) );
-        $saved    = isset( $_GET['saved'] ) ? (int) $_GET['saved'] : 0;
+        $saved    = isset( $_GET['saved'] )         ? (int) $_GET['saved']    : 0;
+        $loaded   = isset( $_GET['loaded'] )        ? (int) $_GET['loaded']   : 0;
+        $imported = isset( $_GET['imported'] )      ? (int) $_GET['imported'] : 0;
+        $imp_err  = isset( $_GET['import_error'] )  ? sanitize_text_field( $_GET['import_error'] ) : '';
+        $profiles = WNI_Profiles::get_all();
         ?>
         <div class="wrap wni-wrap">
             <h1>Noise Injection — Settings</h1>
@@ -77,6 +96,58 @@ class WNI_Admin {
             <?php if ( $saved ) : ?>
                 <div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>
             <?php endif; ?>
+            <?php if ( $loaded ) : ?>
+                <div class="notice notice-success is-dismissible"><p>Profile loaded. Bio, writing style, and topic buckets have been restored.</p></div>
+            <?php endif; ?>
+            <?php if ( $imported ) : ?>
+                <div class="notice notice-success is-dismissible"><p>Profile imported successfully.</p></div>
+            <?php endif; ?>
+            <?php if ( $imp_err ) : ?>
+                <div class="notice notice-error is-dismissible"><p>Import failed: <?php echo esc_html( $imp_err ); ?></p></div>
+            <?php endif; ?>
+
+            <?php /* ── Profile Manager ────────────────────────────────────── */ ?>
+            <div id="wni-profile-manager" class="wni-profile-manager postbox">
+                <div class="postbox-header">
+                    <h2 class="hndle">Saved Profiles</h2>
+                </div>
+                <div class="inside">
+                    <p class="description">Save the current persona (bio, writing style, and all topic buckets) as a named profile. Load a profile to restore a previous configuration instantly — useful after a fresh install or when managing multiple sites.</p>
+
+                    <div class="wni-profile-row">
+                        <select id="wni-profile-select">
+                            <option value="">— Select a profile —</option>
+                            <?php foreach ( $profiles as $p ) : ?>
+                                <option value="<?php echo esc_attr( $p['id'] ); ?>"><?php echo esc_html( $p['name'] ); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <button type="button" id="wni-profile-load"   class="button" disabled>Load</button>
+                        <button type="button" id="wni-profile-delete" class="button button-link-delete" disabled>Delete</button>
+                        <span class="wni-profile-separator">|</span>
+                        <a id="wni-profile-export" href="#" class="button" style="display:none">Export JSON</a>
+                    </div>
+
+                    <div class="wni-profile-row" style="margin-top:10px;">
+                        <input type="text" id="wni-profile-name-input"
+                               placeholder="Profile name, e.g. MacDoug"
+                               class="regular-text" maxlength="80">
+                        <button type="button" id="wni-profile-save" class="button button-primary">Save Current</button>
+                        <span id="wni-profile-status" style="margin-left:8px; font-style:italic;"></span>
+                    </div>
+
+                    <div class="wni-profile-row wni-profile-import-row">
+                        <strong>Import from JSON:</strong>
+                        <form method="post" enctype="multipart/form-data"
+                              action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>"
+                              style="display:inline-flex; align-items:center; gap:6px;">
+                            <?php wp_nonce_field( 'wni_import_profile', 'wni_import_nonce' ); ?>
+                            <input type="hidden" name="action" value="wni_import_profile">
+                            <input type="file" name="wni_profile_json" accept=".json" style="width:auto;">
+                            <button type="submit" class="button">Import</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                 <?php wp_nonce_field( 'wni_save_settings', 'wni_nonce' ); ?>
@@ -225,6 +296,7 @@ class WNI_Admin {
             } else {
                 echo '<p>Auto-generation is disabled or no run is scheduled.</p>';
             }
+            echo WNI_Token_Usage::render_info_block( WNI_Token_Usage::get() );
             ?>
         </div>
         <?php
@@ -407,7 +479,7 @@ class WNI_Admin {
 
     /**
      * Make a raw AI call and return the text content string, or false on failure.
-     * Used by generate_topics and generate_seeds AJAX handlers.
+     * Records token usage as a side effect. Used by generate_topics and generate_seeds handlers.
      */
     private static function call_ai_raw( string $provider, string $api_key, string $model, string $prompt ) {
         if ( $provider === 'claude' ) {
@@ -426,7 +498,16 @@ class WNI_Admin {
             ) );
             if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) return false;
             $body = json_decode( wp_remote_retrieve_body( $response ), true );
-            return $body['content'][0]['text'] ?? false;
+            $text = $body['content'][0]['text'] ?? '';
+            if ( $text !== '' ) {
+                WNI_Token_Usage::record(
+                    (int) ( $body['usage']['input_tokens']  ?? 0 ),
+                    (int) ( $body['usage']['output_tokens'] ?? 0 ),
+                    'claude',
+                    $model
+                );
+            }
+            return $text !== '' ? $text : false;
         }
 
         if ( $provider === 'openai' ) {
@@ -444,10 +525,215 @@ class WNI_Admin {
             ) );
             if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) return false;
             $body = json_decode( wp_remote_retrieve_body( $response ), true );
-            return $body['choices'][0]['message']['content'] ?? false;
+            $text = $body['choices'][0]['message']['content'] ?? '';
+            if ( $text !== '' ) {
+                WNI_Token_Usage::record(
+                    (int) ( $body['usage']['prompt_tokens']     ?? 0 ),
+                    (int) ( $body['usage']['completion_tokens'] ?? 0 ),
+                    'openai',
+                    $model
+                );
+            }
+            return $text !== '' ? $text : false;
         }
 
         return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Profile AJAX Handlers
+    // -------------------------------------------------------------------------
+
+    /**
+     * AJAX: Save current bio, writing style, and topics as a named profile.
+     */
+    public static function ajax_save_profile() {
+        check_ajax_referer( 'wni_profile_action', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+        }
+
+        $name = sanitize_text_field( trim( $_POST['name'] ?? '' ) );
+        if ( $name === '' ) {
+            wp_send_json_error( array( 'message' => 'Profile name is required.' ) );
+        }
+
+        // If updating an existing profile, pass its id so save() overwrites it.
+        $id = sanitize_key( $_POST['id'] ?? '' );
+
+        $profile = WNI_Profiles::save( array( 'name' => $name, 'id' => $id ) );
+
+        $profiles = array_map(
+            function( $p ) { return array( 'id' => $p['id'], 'name' => $p['name'] ); },
+            WNI_Profiles::get_all()
+        );
+
+        wp_send_json_success( array(
+            'message'  => 'Profile "' . $profile['name'] . '" saved.',
+            'profile'  => array( 'id' => $profile['id'], 'name' => $profile['name'] ),
+            'profiles' => $profiles,
+        ) );
+    }
+
+    /**
+     * AJAX: Load a profile — writes bio+style to wni_settings and topics to wni_topics.
+     */
+    public static function ajax_load_profile() {
+        check_ajax_referer( 'wni_profile_action', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+        }
+
+        $id      = sanitize_key( $_POST['profile_id'] ?? '' );
+        $profile = WNI_Profiles::get( $id );
+
+        if ( $profile === null ) {
+            wp_send_json_error( array( 'message' => 'Profile not found.' ) );
+        }
+
+        // Merge bio + writing_style into existing settings (preserves api_key, frequency, etc.)
+        $current                   = WNI_Settings::get();
+        $current['persona_bio']    = $profile['persona_bio'];
+        $current['writing_style']  = $profile['writing_style'];
+        WNI_Settings::save( $current );
+
+        WNI_Topics::save( $profile['topics'] );
+
+        wp_send_json_success( array(
+            'message'      => 'Profile "' . $profile['name'] . '" loaded.',
+            'redirect_url' => admin_url( 'admin.php?page=wni-settings&loaded=1' ),
+        ) );
+    }
+
+    /**
+     * AJAX: Delete a profile by id.
+     */
+    public static function ajax_delete_profile() {
+        check_ajax_referer( 'wni_profile_action', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+        }
+
+        $id = sanitize_key( $_POST['profile_id'] ?? '' );
+
+        if ( ! WNI_Profiles::delete( $id ) ) {
+            wp_send_json_error( array( 'message' => 'Profile not found.' ) );
+        }
+
+        $profiles = array_map(
+            function( $p ) { return array( 'id' => $p['id'], 'name' => $p['name'] ); },
+            WNI_Profiles::get_all()
+        );
+
+        wp_send_json_success( array(
+            'message'  => 'Profile deleted.',
+            'profiles' => $profiles,
+        ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // Token Usage AJAX Handler
+    // -------------------------------------------------------------------------
+
+    /**
+     * AJAX: Reset token usage counters to zero.
+     */
+    public static function ajax_reset_token_usage() {
+        check_ajax_referer( 'wni_reset_token_usage', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+        }
+
+        WNI_Token_Usage::reset();
+        $usage = WNI_Token_Usage::get();
+        $cost  = WNI_Token_Usage::estimate_cost( $usage );
+
+        wp_send_json_success( array(
+            'message' => 'Usage reset.',
+            'usage'   => array_merge( $usage, array(
+                'reset_at_label' => date( 'M j', $usage['reset_at'] ),
+                'cost'           => $cost,
+            ) ),
+        ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // Profile Export / Import (admin-post handlers)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Stream a profile as a JSON file download.
+     * GET admin-post.php?action=wni_export_profile&profile_id=X&_wpnonce=Y
+     */
+    public static function handle_export_profile() {
+        check_admin_referer( 'wni_export_profile' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'Unauthorized.' );
+        }
+
+        $id     = sanitize_key( $_GET['profile_id'] ?? '' );
+        $export = WNI_Profiles::export( $id );
+
+        if ( $export === null ) {
+            wp_die( 'Profile not found.' );
+        }
+
+        $filename = 'wni-profile-' . $id . '.json';
+        header( 'Content-Type: application/json; charset=utf-8' );
+        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+        header( 'Cache-Control: no-cache, no-store, must-revalidate' );
+        echo wp_json_encode( $export, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE );
+        exit;
+    }
+
+    /**
+     * Handle profile JSON file upload and import.
+     * POST admin-post.php action=wni_import_profile
+     */
+    public static function handle_import_profile() {
+        check_admin_referer( 'wni_import_profile', 'wni_import_nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'Unauthorized.' );
+        }
+
+        $redirect_base = admin_url( 'admin.php?page=wni-settings' );
+
+        if ( empty( $_FILES['wni_profile_json']['tmp_name'] ) ) {
+            wp_redirect( $redirect_base . '&import_error=' . urlencode( 'No file uploaded.' ) );
+            exit;
+        }
+
+        $file    = $_FILES['wni_profile_json'];
+        $ext     = strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) );
+
+        if ( $ext !== 'json' ) {
+            wp_redirect( $redirect_base . '&import_error=' . urlencode( 'File must be a .json file.' ) );
+            exit;
+        }
+
+        $raw = file_get_contents( $file['tmp_name'] );
+        if ( $raw === false ) {
+            wp_redirect( $redirect_base . '&import_error=' . urlencode( 'Could not read uploaded file.' ) );
+            exit;
+        }
+
+        $decoded = json_decode( $raw, true );
+        if ( ! is_array( $decoded ) ) {
+            wp_redirect( $redirect_base . '&import_error=' . urlencode( 'Invalid JSON file.' ) );
+            exit;
+        }
+
+        // Support both raw profile objects and export envelopes.
+        $profile_data = $decoded['profile'] ?? $decoded;
+
+        $result = WNI_Profiles::import( $profile_data );
+        if ( is_wp_error( $result ) ) {
+            wp_redirect( $redirect_base . '&import_error=' . urlencode( $result->get_error_message() ) );
+            exit;
+        }
+
+        wp_redirect( $redirect_base . '&imported=1' );
+        exit;
     }
 
     // -------------------------------------------------------------------------
@@ -463,6 +749,8 @@ class WNI_Admin {
             <p>Each bucket is a content category. Enabled buckets are drawn from when generating drafts.
                <strong>Weight</strong> controls how often a bucket is chosen relative to others (1 = rarely, 5 = often).
                <strong>Seeds</strong> are post concepts — one per line, a short phrase describing what a post in that bucket should be about.</p>
+
+            <?php echo WNI_Token_Usage::render_info_block( WNI_Token_Usage::get() ); ?>
 
             <?php if ( $saved ) : ?>
                 <div class="notice notice-success is-dismissible"><p>Topics saved.</p></div>

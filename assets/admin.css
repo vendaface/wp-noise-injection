@@ -141,3 +141,66 @@
     font-size: 12px;
     margin-left: auto;
 }
+
+/* ── Profile Manager ──────────────────────────────────────────────── */
+
+.wni-profile-manager {
+    margin-bottom: 20px;
+}
+
+.wni-profile-manager .inside {
+    padding: 12px 16px 16px;
+}
+
+.wni-profile-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.wni-profile-separator {
+    color: #c3c4c7;
+    padding: 0 2px;
+}
+
+.wni-profile-import-row {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #f0f0f1;
+}
+
+/* ── Token Usage Block ────────────────────────────────────────────── */
+
+.wni-token-usage {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    background: #f6f7f7;
+    border: 1px solid #c3c4c7;
+    border-radius: 4px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+
+.wni-token-usage__label {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.wni-token-usage__since {
+    font-weight: 400;
+    color: #646970;
+}
+
+.wni-token-usage__stats {
+    color: #1d2327;
+}
+
+.wni-token-usage__note {
+    color: #8c8f94;
+    font-size: 11px;
+    font-style: italic;
+}

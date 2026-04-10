@@ -279,7 +279,17 @@ PROMPT;
         $body = json_decode( wp_remote_retrieve_body( $response ), true );
         $text = $body['content'][0]['text'] ?? '';
 
-        return $text !== '' ? wp_kses_post( $text ) : false;
+        if ( $text !== '' ) {
+            WNI_Token_Usage::record(
+                (int) ( $body['usage']['input_tokens']  ?? 0 ),
+                (int) ( $body['usage']['output_tokens'] ?? 0 ),
+                'claude',
+                $model
+            );
+            return wp_kses_post( $text );
+        }
+
+        return false;
     }
 
     /**
@@ -315,7 +325,17 @@ PROMPT;
         $body = json_decode( wp_remote_retrieve_body( $response ), true );
         $text = $body['choices'][0]['message']['content'] ?? '';
 
-        return $text !== '' ? wp_kses_post( $text ) : false;
+        if ( $text !== '' ) {
+            WNI_Token_Usage::record(
+                (int) ( $body['usage']['prompt_tokens']     ?? 0 ),
+                (int) ( $body['usage']['completion_tokens'] ?? 0 ),
+                'openai',
+                $model
+            );
+            return wp_kses_post( $text );
+        }
+
+        return false;
     }
 
     /**
