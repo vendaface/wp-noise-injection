@@ -62,7 +62,7 @@ class WNI_Generator {
 
     private static function create_draft( array $topic, string $seed, array $settings ) {
         $title = self::seed_to_title( $seed );
-        $body  = self::build_body( $seed );
+        $body  = self::build_body( $seed, $topic['label'] );
 
         // Scatter post dates over the past 60 days to avoid timestamp clustering.
         $offset_days = wp_rand( 0, 60 );
@@ -114,10 +114,17 @@ class WNI_Generator {
     }
 
     /**
-     * Build a post body from a seed using one of three structural templates.
+     * Build a post body from a seed.
+     * Tries AI generation first; falls back to the static template system silently
+     * if no provider is configured or if the API call fails for any reason.
      */
-    private static function build_body( string $seed ): string {
-        // Extract detail clause (after colon if present, otherwise whole seed).
+    private static function build_body( string $seed, string $topic_label = '' ): string {
+        $ai_body = self::generate_ai_body( $seed, $topic_label );
+        if ( $ai_body !== false ) {
+            return $ai_body;
+        }
+
+        // Fallback: static template system.
         $detail = $seed;
         if ( strpos( $seed, ':' ) !== false ) {
             $parts  = explode( ':', $seed, 2 );
@@ -127,6 +134,140 @@ class WNI_Generator {
         $templates = self::body_templates();
         $template  = $templates[ array_rand( $templates ) ];
         return call_user_func( $template, $detail );
+    }
+
+    /**
+     * Generate a post body via AI API.
+     *
+     * Uses the configured provider (Claude or OpenAI). All API calls are
+     * server-side — the key is never exposed to the browser. Returns an HTML
+     * string on success, false on any failure (missing key, network error,
+     * API error, malformed response).
+     *
+     * @param  string       $seed        The seed string (becomes the post concept).
+     * @param  string       $topic_label Human-readable topic name for prompt context.
+     * @return string|false              HTML body or false if generation failed.
+     */
+    private static function generate_ai_body( string $seed, string $topic_label ) {
+        $settings = WNI_Settings::get();
+
+        $provider = $settings['ai_provider'] ?? 'none';
+        $api_key  = $settings['ai_api_key']  ?? '';
+        $model    = $settings['ai_model']    ?? '';
+
+        if ( $provider === 'none' || $api_key === '' ) {
+            return false;
+        }
+
+        if ( $model === '' ) {
+            $model = WNI_Settings::provider_default_model( $provider );
+        }
+
+        $prompt = self::build_prompt( $seed, $topic_label );
+
+        if ( $provider === 'claude' ) {
+            return self::call_claude( $api_key, $model, $prompt );
+        }
+
+        if ( $provider === 'openai' ) {
+            return self::call_openai( $api_key, $model, $prompt );
+        }
+
+        return false;
+    }
+
+    /**
+     * Build the generation prompt.
+     */
+    private static function build_prompt( string $seed, string $topic_label ): string {
+        $topic_line = $topic_label ? "\nTopic area: {$topic_label}" : '';
+        return <<<PROMPT
+Write a personal blog post draft for a fictional persona about the following topic:
+
+"{$seed}"{$topic_line}
+
+Guidelines:
+- The persona and all experiences described are entirely invented — do not draw on any real identifying information. All anecdotes, observations, and details should be fabricated.
+- First person, conversational tone — personal blog, not corporate or SEO-optimized.
+- 300–400 words, 3–4 paragraphs.
+- No headers or subheadings.
+- Specific invented detail (a particular trail, a specific tool, a memorable moment) makes the writing feel more credible than vague generalities.
+- End naturally — no calls to action, no "in conclusion".
+- Return only the post body as HTML using <p> tags. No title, no preamble, no explanation.
+PROMPT;
+    }
+
+    /**
+     * Call the Anthropic Claude API.
+     *
+     * @return string|false
+     */
+    private static function call_claude( string $api_key, string $model, string $prompt ) {
+        $response = wp_remote_post( 'https://api.anthropic.com/v1/messages', array(
+            'timeout' => 45,
+            'headers' => array(
+                'x-api-key'         => $api_key,
+                'anthropic-version' => '2023-06-01',
+                'content-type'      => 'application/json',
+            ),
+            'body' => wp_json_encode( array(
+                'model'      => $model,
+                'max_tokens' => 1024,
+                'messages'   => array(
+                    array( 'role' => 'user', 'content' => $prompt ),
+                ),
+            ) ),
+        ) );
+
+        if ( is_wp_error( $response ) ) {
+            return false;
+        }
+
+        $code = wp_remote_retrieve_response_code( $response );
+        if ( $code !== 200 ) {
+            return false;
+        }
+
+        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+        $text = $body['content'][0]['text'] ?? '';
+
+        return $text !== '' ? wp_kses_post( $text ) : false;
+    }
+
+    /**
+     * Call the OpenAI Chat Completions API.
+     *
+     * @return string|false
+     */
+    private static function call_openai( string $api_key, string $model, string $prompt ) {
+        $response = wp_remote_post( 'https://api.openai.com/v1/chat/completions', array(
+            'timeout' => 45,
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $api_key,
+                'content-type'  => 'application/json',
+            ),
+            'body' => wp_json_encode( array(
+                'model'      => $model,
+                'max_tokens' => 1024,
+                'messages'   => array(
+                    array( 'role' => 'user', 'content' => $prompt ),
+                ),
+            ) ),
+        ) );
+
+        if ( is_wp_error( $response ) ) {
+            return false;
+        }
+
+        $code = wp_remote_retrieve_response_code( $response );
+        if ( $code !== 200 ) {
+            return false;
+        }
+
+        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+        $text = $body['choices'][0]['message']['content'] ?? '';
+
+        return $text !== '' ? wp_kses_post( $text ) : false;
     }
 
     /**

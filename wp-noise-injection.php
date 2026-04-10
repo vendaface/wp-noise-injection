@@ -3,7 +3,7 @@
  * Plugin Name:  WP Noise Injection
  * Plugin URI:   https://github.com/yourusername/wp-noise-injection
  * Description:  Generates varied draft posts across configurable topic buckets to broaden a site's content fingerprint. Posts are always created as drafts — you review and publish manually.
- * Version:      1.0.0
+ * Version:      1.1.0
  * Requires at least: 6.0
  * Requires PHP: 8.0
  * Author:       Your Name
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WNI_VERSION',    '1.0.0' );
+define( 'WNI_VERSION',    '1.1.0' );
 define( 'WNI_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WNI_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'WNI_OPTION_KEY', 'wni_settings' );

@@ -19,7 +19,21 @@ class WNI_Settings {
             'batch_size'    => 1,
             'author_id'     => get_current_user_id(),
             'post_status'   => 'draft', // always draft — never auto-publish
+            'ai_provider'   => 'none',  // 'none' | 'claude' | 'openai'
+            'ai_api_key'    => '',
+            'ai_model'      => '',      // empty = use provider default
         );
+    }
+
+    /**
+     * Default model for each provider when ai_model is left empty.
+     */
+    public static function provider_default_model( string $provider ): string {
+        $defaults = array(
+            'claude' => 'claude-haiku-4-5-20251001',
+            'openai' => 'gpt-4o-mini',
+        );
+        return $defaults[ $provider ] ?? '';
     }
 
     public static function get() {
@@ -35,6 +49,10 @@ class WNI_Settings {
             'batch_size'    => max( 1, min( 5, (int) $input['batch_size'] ) ),
             'author_id'     => (int) $input['author_id'],
             'post_status'   => 'draft',
+            'ai_provider'   => in_array( $input['ai_provider'] ?? '', array( 'none', 'claude', 'openai' ), true )
+                                ? $input['ai_provider'] : 'none',
+            'ai_api_key'    => sanitize_text_field( $input['ai_api_key'] ?? '' ),
+            'ai_model'      => sanitize_text_field( $input['ai_model'] ?? '' ),
         );
         update_option( WNI_OPTION_KEY, $clean );
 
