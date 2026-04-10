@@ -62,7 +62,7 @@ class WNI_Generator {
 
     private static function create_draft( array $topic, string $seed, array $settings ) {
         $title = self::seed_to_title( $seed );
-        $body  = self::build_body( $seed, $topic['label'] );
+        $body  = self::build_body( $seed, $topic['label'], $topic['id'] );
 
         // Scatter post dates over the past 60 days to avoid timestamp clustering.
         $offset_days = wp_rand( 0, 60 );
@@ -118,7 +118,7 @@ class WNI_Generator {
      * Tries AI generation first; falls back to the static template system silently
      * if no provider is configured or if the API call fails for any reason.
      */
-    private static function build_body( string $seed, string $topic_label = '' ): string {
+    private static function build_body( string $seed, string $topic_label = '', string $topic_id = '' ): string {
         $ai_body = self::generate_ai_body( $seed, $topic_label );
         if ( $ai_body !== false ) {
             return $ai_body;
@@ -131,7 +131,7 @@ class WNI_Generator {
             $detail = trim( $parts[1] );
         }
 
-        $templates = self::body_templates();
+        $templates = self::body_templates( $topic_id );
         $template  = $templates[ array_rand( $templates ) ];
         return call_user_func( $template, $detail );
     }
@@ -322,7 +322,7 @@ PROMPT;
      * Three structural templates for post bodies.
      * Each is a closure taking a $detail string and returning HTML.
      */
-    private static function body_templates(): array {
+    private static function body_templates( string $topic_id = '' ): array {
 
         $openers = array(
             'A few notes on',
@@ -346,10 +346,10 @@ PROMPT;
         return array(
 
             // Template 1: Opener + three observations + closer
-            function( $detail ) use ( $openers, $closers ) {
+            function( $detail ) use ( $openers, $closers, $topic_id ) {
                 $opener = $openers[ array_rand( $openers ) ];
                 $closer = $closers[ array_rand( $closers ) ];
-                $obs    = self::observations( 3 );
+                $obs    = self::observations( 3, $topic_id );
                 $body   = "<p>{$opener} {$detail}.</p>\n\n";
                 foreach ( $obs as $o ) {
                     $body .= "<p>{$o}</p>\n\n";
@@ -359,9 +359,9 @@ PROMPT;
             },
 
             // Template 2: Short personal process note
-            function( $detail ) use ( $closers ) {
+            function( $detail ) use ( $closers, $topic_id ) {
                 $closer = $closers[ array_rand( $closers ) ];
-                $obs    = self::observations( 2 );
+                $obs    = self::observations( 2, $topic_id );
                 $body   = "<p>Here's where I've landed on {$detail}.</p>\n\n";
                 $body  .= "<p>{$obs[0]}</p>\n\n";
                 $body  .= "<p>{$obs[1]}</p>\n\n";
@@ -370,9 +370,9 @@ PROMPT;
             },
 
             // Template 3: Two-section with a mid-post heading
-            function( $detail ) use ( $closers ) {
+            function( $detail ) use ( $closers, $topic_id ) {
                 $closer = $closers[ array_rand( $closers ) ];
-                $obs    = self::observations( 4 );
+                $obs    = self::observations( 4, $topic_id );
                 $body   = "<p>{$obs[0]}</p>\n\n";
                 $body  .= "<p>{$obs[1]}</p>\n\n";
                 $body  .= "<h2>What I actually do</h2>\n\n";
@@ -386,42 +386,140 @@ PROMPT;
     }
 
     /**
-     * Generic observation sentences drawn to fill post bodies.
+     * Observation sentences used to fill post bodies in the static template fallback.
      *
-     * These are intentionally topic-neutral: they read as plausible personal
-     * reflection regardless of subject matter. The seed provides the specific
-     * topic; these sentences provide structure and word count.
+     * Topic-specific banks are keyed by topic ID (the sanitized slug generated from
+     * the topic label, e.g. "data_privacy", "wordpress", "genealogy"). If no
+     * matching bank exists the generic fallback bank is used.
      *
-     * To customise the generated content more heavily, edit these sentences or
-     * extend this method to accept topic-specific banks keyed by topic ID.
+     * Topic IDs are matched loosely — any topic whose slug contains one of the
+     * known keywords will use the relevant bank. Add more banks here as needed.
+     *
+     * @param  int    $count    Number of sentences to return.
+     * @param  string $topic_id The topic slug (e.g. from topic['id']).
+     * @return string[]
      */
-    private static function observations( int $count ): array {
-        $bank = array(
-            'The hard part isn\'t the initial setup — it\'s making the habit stick long enough to get useful data.',
-            'I\'ve changed my approach here more than once. What I have now is simpler than what I started with.',
-            'Most of the complexity in this area is incidental rather than essential. Worth separating the two.',
-            'I started paying attention to this after a situation that wasn\'t catastrophic but was annoying enough to motivate change.',
-            'The defaults are rarely set up with your specific interests as the priority. Worth auditing at least once.',
-            'The gap between what\'s possible and what most people actually do is where most of the interesting questions live.',
-            'I try to revisit this once a year. It takes a few hours and consistently turns up something worth adjusting.',
-            'There\'s a lot of advice in this area that\'s technically correct but practically useless. I try to focus on what actually changes behaviour.',
-            'The convenience tradeoff is real. I\'ve accepted some friction in exchange for outcomes I care about.',
-            'I don\'t think of this as a one-time decision. It\'s more like ongoing maintenance.',
-            'The best approach is usually the one you\'ll actually follow consistently, not the theoretically optimal one.',
-            'I\'m skeptical of anything that adds significant complexity without a proportional payoff.',
-            'My setup has gotten simpler over the years, not more elaborate. That\'s been the right direction.',
-            'The difference between what I thought I wanted and what I actually use has been instructive.',
-            'Automation earns its keep when the underlying thing is genuinely repetitive. Otherwise it\'s usually just deferred thinking.',
-            'I try to distinguish between things I need and things I find interesting. The lists don\'t overlap as much as I\'d like.',
-            'Writing things down, even roughly, is usually where I figure out what I actually think.',
-            'The question I should have asked earlier was simpler than the ones I spent time on.',
-            'Context matters more here than most general advice acknowledges.',
-            'I\'ve stopped trying to find the perfect version of this. Good enough and consistent beats perfect and inconsistent.',
-            'Talking to people who disagree with my approach has been more useful than reading people who confirm it.',
-            'The thing that changed my view wasn\'t an argument — it was seeing the alternative work in practice.',
-            'I\'d rather know what I don\'t know here than be confident about something I haven\'t tested.',
-            'The version of this I describe to others is usually simpler than what I actually do, which probably means I should simplify.',
+    private static function observations( int $count, string $topic_id = '' ): array {
+
+        $banks = array(
+
+            'data_privacy' => array(
+                'The gap between what privacy policies say and what the underlying data practices actually are is usually substantial.',
+                'Opt-out mechanisms are designed to satisfy a legal requirement, not to actually give you control. The distinction matters.',
+                'The aggregation problem is what most people miss: individually innocuous data points become sensitive in combination.',
+                'I find it useful to think about data collection as a long-term liability rather than a current inconvenience.',
+                'The companies most forthcoming about their data practices are not necessarily the ones doing the least with your data.',
+                'Most people\'s threat model for personal data focuses on breach — the dramatic scenario. The mundane scenario, data being used exactly as intended, is usually more relevant.',
+                'Consent frameworks built on notice-and-choice put the burden on individuals to evaluate complex technical arrangements. It\'s a bad design.',
+                'The right question isn\'t whether your data is being collected. It\'s who has access to it, for how long, and under what circumstances.',
+                'Regulatory frameworks tend to lag behind technical capabilities by a decade or more. That gap is where most of the actual exposure lives.',
+                'I\'ve stopped expecting privacy by default from services funded by advertising. The incentives don\'t point that direction.',
+            ),
+
+            'tech_policy' => array(
+                'Platform regulation tends to focus on content rather than structure. The structural questions are harder and more consequential.',
+                'Antitrust enforcement in technology markets requires thinking about competition in ways the standard consumer welfare framework wasn\'t designed for.',
+                'The interoperability question — whether dominant platforms can be required to allow competing services to interconnect — is underexplored as a policy lever.',
+                'Most technology policy debates conflate several distinct problems that would require different solutions. Separating them out is slow work but necessary.',
+                'The lobbying infrastructure around major technology companies is now sophisticated enough that most reform proposals get shaped before they reach a vote.',
+                'Public interest technology — the use of technical expertise in service of policy and civic goals — is an underdeveloped field but a growing one.',
+                'The difficulty with algorithmic accountability frameworks is that the systems they\'re trying to govern change faster than any regulatory cycle.',
+                'State-level tech policy has gotten more sophisticated over the past few years. The action has shifted noticeably from federal to state.',
+                'The difference between what\'s technically possible and what most people actually do is where most of the real exposure lives.',
+            ),
+
+            'security' => array(
+                'The hard part isn\'t the technical setup — it\'s making the habit stick enough that you actually use it.',
+                'I\'ve changed my approach to this a few times over the years. What I have now is simpler than what I started with.',
+                'Most of the threat model for an individual is pretty mundane. The interesting question is where you draw the line between effort and benefit.',
+                'I started doing this after an incident that wasn\'t catastrophic but was annoying enough to motivate change.',
+                'The default settings on most things are not set up with your interests as the priority.',
+                'I try to audit this once a year. It takes a few hours. It\'s worth it.',
+                'There\'s a lot of security advice that\'s technically correct but practically useless. I focus on things that actually change behavior.',
+                'The convenience tradeoff is real. I\'ve had to accept some friction in exchange for things I actually care about.',
+                'I don\'t think of this as a one-time fix. It\'s more like maintenance.',
+                'The best setup is the one you\'ll actually use consistently, not the theoretically optimal one.',
+            ),
+
+            'wordpress' => array(
+                'The ecosystem has matured enough that most common problems have good solutions. The hard part is knowing which ones to trust.',
+                'I\'ve built enough sites now that I have strong opinions about what goes into a default setup.',
+                'The temptation to over-engineer a small site is real. I try to resist it.',
+                'Client expectations and technical reality don\'t always line up. A lot of my job is translation.',
+                'Performance is the thing most clients don\'t care about until it\'s a problem, and then they care a lot.',
+                'I keep a staging environment for anything I\'m not certain about. It\'s saved me more than once.',
+                'The plugin quality spectrum is enormous. I\'d rather pay for something maintained than use something free and abandoned.',
+                'Security on WordPress is mostly about not doing the obvious wrong things. A short list of habits covers most of it.',
+                'I\'ve stopped trying to make WordPress do things it isn\'t designed for. There\'s usually a better tool for the job.',
+                'Updates are the boring part of WordPress that most clients don\'t want to pay for until something breaks.',
+            ),
+
+            'tools' => array(
+                'I\'ve tried a lot of things in this category. Most of them didn\'t stick.',
+                'The best tool is usually the one you\'ll actually use consistently.',
+                'I\'m skeptical of anything that adds a significant learning curve without a clear payoff.',
+                'My setup has gotten simpler over the years, not more complex.',
+                'The defaults on most software are fine. The rabbit hole of customization rarely pays off proportionally.',
+                'Automation is worth it when the thing you\'re automating is genuinely repetitive. Otherwise it\'s just procrastination.',
+                'I try to distinguish between tools I need and tools I find interesting. Not the same list.',
+                'Documentation that I write for myself is usually the most useful kind.',
+                'I\'ve stopped chasing the perfect setup. Good enough and consistent beats perfect and inconsistent.',
+                'Version control for things that aren\'t code took me longer to adopt than it should have.',
+            ),
+
+            'genealogy' => array(
+                'Genealogy research teaches you to be comfortable with ambiguity. The records are incomplete by definition.',
+                'I\'ve found that the most useful research happens when I stop trying to confirm what I expect and start looking at what\'s actually there.',
+                'The difference between a confident conclusion and a reasonable inference matters. I try to keep track of which is which.',
+                'Most of the interesting findings came from sources I didn\'t know existed until I was already deep into a different problem.',
+                'Spelling variants will get you if you\'re not looking for them. I\'ve learned to search broadly before concluding something isn\'t there.',
+                'Other researchers are usually generous with what they\'ve found. The etiquette is to be equally generous in return.',
+                'The digital archives have gotten dramatically better over the past decade. Records that used to require a physical trip are often online now.',
+                'I\'ve learned to be skeptical of published family histories. They frequently contain errors that have been copied forward without checking.',
+                'The census records tell a different kind of story than the parish records. Combining them is usually where the interesting stuff is.',
+                'I try to document where I got each piece of information. Future-me is always grateful when past-me did this.',
+            ),
+
+            // Generic fallback — topic-neutral personal reflection.
+            'generic' => array(
+                'The hard part isn\'t the initial setup — it\'s making the habit stick long enough to get useful data.',
+                'I\'ve changed my approach here more than once. What I have now is simpler than what I started with.',
+                'Most of the complexity in this area is incidental rather than essential. Worth separating the two.',
+                'I started paying attention to this after a situation that wasn\'t catastrophic but was annoying enough to motivate change.',
+                'The defaults are rarely set up with your specific interests as the priority. Worth auditing at least once.',
+                'The gap between what\'s possible and what most people actually do is where most of the interesting questions live.',
+                'I try to revisit this once a year. It takes a few hours and consistently turns up something worth adjusting.',
+                'There\'s a lot of advice in this area that\'s technically correct but practically useless. I try to focus on what actually changes behaviour.',
+                'The convenience tradeoff is real. I\'ve accepted some friction in exchange for outcomes I care about.',
+                'I don\'t think of this as a one-time decision. It\'s more like ongoing maintenance.',
+                'The best approach is usually the one you\'ll actually follow consistently, not the theoretically optimal one.',
+                'I\'m skeptical of anything that adds significant complexity without a proportional payoff.',
+                'My setup has gotten simpler over the years, not more elaborate. That\'s been the right direction.',
+                'The difference between what I thought I wanted and what I actually use has been instructive.',
+                'Automation earns its keep when the underlying thing is genuinely repetitive. Otherwise it\'s usually just deferred thinking.',
+                'I try to distinguish between things I need and things I find interesting. The lists don\'t overlap as much as I\'d like.',
+                'Writing things down, even roughly, is usually where I figure out what I actually think.',
+                'The question I should have asked earlier was simpler than the ones I spent time on.',
+                'Context matters more here than most general advice acknowledges.',
+                'I\'ve stopped trying to find the perfect version of this. Good enough and consistent beats perfect and inconsistent.',
+                'Talking to people who disagree with my approach has been more useful than reading people who confirm it.',
+                'The thing that changed my view wasn\'t an argument — it was seeing the alternative work in practice.',
+                'I\'d rather know what I don\'t know here than be confident about something I haven\'t tested.',
+                'The version of this I describe to others is usually simpler than what I actually do, which probably means I should simplify.',
+            ),
         );
+
+        // Match topic_id to a bank. Check for keyword overlap so that topic IDs
+        // like "browser_security" still match the 'security' bank.
+        $matched = 'generic';
+        foreach ( array_keys( $banks ) as $key ) {
+            if ( $key !== 'generic' && strpos( $topic_id, $key ) !== false ) {
+                $matched = $key;
+                break;
+            }
+        }
+
+        $bank = $banks[ $matched ];
         shuffle( $bank );
         return array_slice( $bank, 0, $count );
     }
