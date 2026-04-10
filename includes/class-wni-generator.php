@@ -178,22 +178,70 @@ class WNI_Generator {
 
     /**
      * Build the generation prompt.
+     * Uses persona bio and writing style from settings when available.
      */
     private static function build_prompt( string $seed, string $topic_label ): string {
-        $topic_line = $topic_label ? "\nTopic area: {$topic_label}" : '';
+        $settings      = WNI_Settings::get();
+        $bio           = trim( $settings['persona_bio']   ?? '' );
+        $writing_style = trim( $settings['writing_style'] ?? '' );
+        $topic_line    = $topic_label ? "\nCategory: {$topic_label}" : '';
+        $style_line    = $writing_style ?: 'conversational first-person, favors specific detail over generalization';
+
+        $natural_rules = <<<'RULES'
+Natural writing requirements (critical — failure to follow these makes the writing obviously AI-generated):
+- Vary sentence length significantly — mix short punchy sentences with longer ones
+- Use contractions throughout (I've, it's, didn't, you'd, we're, that's)
+- Sentence fragments are fine when they feel right
+- Can start sentences with "And", "But", or "So"
+- Specific named detail (a particular trail, an exact tool, a specific moment) beats vague generality
+- Don't over-explain or hedge — assume the reader can keep up
+- NEVER use: delve, tapestry, journey (metaphorical), navigate (metaphorical), realm, leverage, foster, nuanced, multifaceted, pivotal, utilize, underscore, "it's worth noting", "it's important to", "in today's world"
+- No "Firstly / Secondly / Finally / In conclusion" structure
+- Don't repeat points already made
+- End on a specific note, not a summary
+RULES;
+
+        if ( $bio !== '' ) {
+            return <<<PROMPT
+You are ghostwriting a blog post for the following persona:
+
+{$bio}
+
+Writing style: {$style_line}
+
+Post topic: "{$seed}"{$topic_line}
+
+Write the post as this person would naturally write it. All experiences and details should be invented for this persona — do not use any real identifying information.
+
+Length and structure:
+- 300–400 words, 3–4 paragraphs
+- No headers or subheadings
+- End naturally — no wrap-up paragraph, no lessons-learned summary, no call to action
+
+{$natural_rules}
+
+Return only the post body as HTML <p> tags. No title, no preamble, no explanation.
+PROMPT;
+        }
+
+        // No bio — generic fictional persona prompt.
         return <<<PROMPT
 Write a personal blog post draft for a fictional persona about the following topic:
 
 "{$seed}"{$topic_line}
 
-Guidelines:
-- The persona and all experiences described are entirely invented — do not draw on any real identifying information. All anecdotes, observations, and details should be fabricated.
-- First person, conversational tone — personal blog, not corporate or SEO-optimized.
-- 300–400 words, 3–4 paragraphs.
-- No headers or subheadings.
-- Specific invented detail (a particular trail, a specific tool, a memorable moment) makes the writing feel more credible than vague generalities.
-- End naturally — no calls to action, no "in conclusion".
-- Return only the post body as HTML using <p> tags. No title, no preamble, no explanation.
+The persona and all experiences described are entirely invented. All anecdotes, observations, and details should be fabricated.
+
+Writing style: {$style_line}
+
+Length and structure:
+- 300–400 words, 3–4 paragraphs
+- No headers or subheadings
+- End naturally — no wrap-up paragraph, no call to action
+
+{$natural_rules}
+
+Return only the post body as HTML <p> tags. No title, no preamble, no explanation.
 PROMPT;
     }
 

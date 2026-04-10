@@ -22,6 +22,8 @@ class WNI_Settings {
             'ai_provider'   => 'none',  // 'none' | 'claude' | 'openai'
             'ai_api_key'    => '',
             'ai_model'      => '',      // empty = use provider default
+            'persona_bio'   => '',      // free-text description of the blog author/persona
+            'writing_style' => '',      // tone and voice description
         );
     }
 
@@ -53,6 +55,8 @@ class WNI_Settings {
                                 ? $input['ai_provider'] : 'none',
             'ai_api_key'    => sanitize_text_field( $input['ai_api_key'] ?? '' ),
             'ai_model'      => sanitize_text_field( $input['ai_model'] ?? '' ),
+            'persona_bio'   => sanitize_textarea_field( $input['persona_bio'] ?? '' ),
+            'writing_style' => sanitize_textarea_field( $input['writing_style'] ?? '' ),
         );
         update_option( WNI_OPTION_KEY, $clean );
 

@@ -12,6 +12,8 @@ class WNI_Admin {
         add_action( 'admin_post_wni_save_topics',     array( __CLASS__, 'handle_save_topics' ) );
         add_action( 'admin_post_wni_generate_now',    array( __CLASS__, 'handle_generate_now' ) );
         add_action( 'wp_ajax_wni_test_ai',            array( __CLASS__, 'ajax_test_ai' ) );
+        add_action( 'wp_ajax_wni_generate_topics',    array( __CLASS__, 'ajax_generate_topics' ) );
+        add_action( 'wp_ajax_wni_generate_seeds',     array( __CLASS__, 'ajax_generate_seeds' ) );
         add_action( 'admin_enqueue_scripts',          array( __CLASS__, 'enqueue_admin_assets' ) );
     }
 
@@ -45,10 +47,15 @@ class WNI_Admin {
         }
         wp_enqueue_style( 'wni-admin', WNI_PLUGIN_URL . 'assets/admin.css', array(), WNI_VERSION );
         wp_enqueue_script( 'wni-admin', WNI_PLUGIN_URL . 'assets/admin.js', array( 'jquery' ), WNI_VERSION, true );
+        $settings = WNI_Settings::get();
         wp_localize_script( 'wni-admin', 'wniAdmin', array(
-            'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-            'nonce'   => wp_create_nonce( 'wni_test_ai' ),
-            'models'  => array(
+            'ajaxUrl'             => admin_url( 'admin-ajax.php' ),
+            'nonce'               => wp_create_nonce( 'wni_test_ai' ),
+            'generateTopicsNonce' => wp_create_nonce( 'wni_generate_topics' ),
+            'generateSeedsNonce'  => wp_create_nonce( 'wni_generate_seeds' ),
+            'topicsUrl'           => admin_url( 'admin.php?page=wni-topics' ),
+            'hasBio'              => ! empty( $settings['persona_bio'] ),
+            'models'              => array(
                 'claude' => WNI_Settings::provider_default_model( 'claude' ),
                 'openai' => WNI_Settings::provider_default_model( 'openai' ),
             ),
@@ -75,6 +82,45 @@ class WNI_Admin {
                 <?php wp_nonce_field( 'wni_save_settings', 'wni_nonce' ); ?>
                 <input type="hidden" name="action" value="wni_save_settings">
 
+                <h2>Persona Setup</h2>
+                <p>Describe the blog author in plain language. The more specific, the better — include location, interests, habits, profession, age, anything that makes this person distinct. The AI uses this to generate topic buckets, post seeds, and post bodies that feel specific to this person rather than generic.</p>
+
+                <table class="form-table">
+                    <tr>
+                        <th scope="row"><label for="wni_persona_bio">Author Bio</label></th>
+                        <td>
+                            <textarea name="persona_bio" id="wni_persona_bio"
+                                      rows="6" class="large-text"
+                                      placeholder="Example: Doug is a retired high school science teacher in his early 60s who lives on the east side of Providence, Rhode Island. He grew up in western Massachusetts and moved to Providence in the 1990s. He spends a lot of time walking the city, following local politics closely, eating at neighborhood restaurants, and taking day trips around New England. He's skeptical of hype, pays attention to local history, and writes the way he talks — plainly, with occasional dry humor."><?php echo esc_textarea( $settings['persona_bio'] ); ?></textarea>
+                            <p class="description">Used to generate topics, seeds, and post content. Never transmitted anywhere except your configured AI provider.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="wni_writing_style">Writing Style</label></th>
+                        <td>
+                            <textarea name="writing_style" id="wni_writing_style"
+                                      rows="3" class="large-text"
+                                      placeholder="Example: Dry and understated. Prefers specific detail over generalization. Occasionally wry. Doesn't explain things that don't need explaining. Short sentences when making a point."><?php echo esc_textarea( $settings['writing_style'] ); ?></textarea>
+                            <p class="description">Shapes the tone of generated post bodies. Leave blank for a default conversational style.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Generate Topics</th>
+                        <td>
+                            <?php if ( empty( $settings['persona_bio'] ) ) : ?>
+                                <p class="description">Enter and save an Author Bio first, then return here to generate topic buckets.</p>
+                            <?php elseif ( $settings['ai_provider'] === 'none' ) : ?>
+                                <p class="description">Configure an AI provider below, save, then return here to generate topics.</p>
+                            <?php else : ?>
+                                <button type="button" id="wni-generate-topics" class="button">Generate Topics from Bio</button>
+                                <span id="wni-topics-result" style="margin-left:10px; font-style:italic;"></span>
+                                <p class="description">Generates 6–8 topic bucket names from the bio above. <strong>Replaces existing topic buckets</strong> (seeds are cleared). Save settings first if you've made changes.</p>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                </table>
+
+                <h2>General Settings</h2>
                 <table class="form-table">
                     <tr>
                         <th scope="row"><label for="wni_author_id">Post Author</label></th>
@@ -257,6 +303,153 @@ class WNI_Admin {
         wp_send_json_error( array( 'message' => "API error: {$error_msg}" ) );
     }
 
+    /**
+     * AJAX: Generate topic bucket names from the persona bio using AI.
+     * Saves results to DB and returns success with topic count.
+     */
+    public static function ajax_generate_topics() {
+        check_ajax_referer( 'wni_generate_topics', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+        }
+
+        $settings = WNI_Settings::get();
+        $bio      = $settings['persona_bio'] ?? '';
+        $provider = $settings['ai_provider'] ?? 'none';
+        $api_key  = $settings['ai_api_key']  ?? '';
+        $model    = $settings['ai_model']    ?: WNI_Settings::provider_default_model( $provider );
+
+        if ( empty( $bio ) ) {
+            wp_send_json_error( array( 'message' => 'No persona bio configured. Add one in Settings first.' ) );
+        }
+        if ( $provider === 'none' || empty( $api_key ) ) {
+            wp_send_json_error( array( 'message' => 'No AI provider configured.' ) );
+        }
+
+        $prompt = "Given this blog author bio:\n\n\"{$bio}\"\n\nGenerate 6-8 blog category names for their personal blog.\n\nRequirements:\n- Each name is 2-3 words only\n- Specific to this person's life, location, and interests — not generic\n- Sound like natural blog sections, not marketing categories\n- Reflect what this specific person would actually write about\n\nReturn a valid JSON array of strings only, no explanation. Example: [\"Weekend Hiking\", \"Home Brewing\", \"Local Eats\"]";
+
+        $text = self::call_ai_raw( $provider, $api_key, $model, $prompt );
+        if ( $text === false ) {
+            wp_send_json_error( array( 'message' => 'AI request failed. Check your API key and provider.' ) );
+        }
+
+        // Extract JSON array from response (strip any markdown fences).
+        $json_text = preg_replace( '/^```(?:json)?\s*/m', '', trim( $text ) );
+        $json_text = preg_replace( '/```\s*$/m', '', $json_text );
+        $names     = json_decode( trim( $json_text ), true );
+
+        if ( ! is_array( $names ) || empty( $names ) ) {
+            wp_send_json_error( array( 'message' => 'Could not parse topic names from AI response.' ) );
+        }
+
+        $topics = array();
+        foreach ( $names as $name ) {
+            $name = sanitize_text_field( trim( $name ) );
+            if ( $name === '' ) continue;
+            $topics[] = array(
+                'id'      => sanitize_key( str_replace( ' ', '_', strtolower( $name ) ) ),
+                'label'   => $name,
+                'enabled' => true,
+                'weight'  => 2,
+                'seeds'   => array(),
+            );
+        }
+
+        WNI_Topics::save( $topics );
+        wp_send_json_success( array(
+            'message' => count( $topics ) . ' topics generated and saved.',
+            'count'   => count( $topics ),
+        ) );
+    }
+
+    /**
+     * AJAX: Generate post seeds for a topic bucket from the persona bio using AI.
+     * Returns seeds array to JS (not saved — JS populates the textarea, user saves manually).
+     */
+    public static function ajax_generate_seeds() {
+        check_ajax_referer( 'wni_generate_seeds', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+        }
+
+        $settings    = WNI_Settings::get();
+        $bio         = $settings['persona_bio'] ?? '';
+        $provider    = $settings['ai_provider'] ?? 'none';
+        $api_key     = $settings['ai_api_key']  ?? '';
+        $model       = $settings['ai_model']    ?: WNI_Settings::provider_default_model( $provider );
+        $topic_label = sanitize_text_field( $_POST['topic_label'] ?? '' );
+
+        if ( empty( $bio ) || empty( $topic_label ) ) {
+            wp_send_json_error( array( 'message' => 'Missing bio or topic name.' ) );
+        }
+        if ( $provider === 'none' || empty( $api_key ) ) {
+            wp_send_json_error( array( 'message' => 'No AI provider configured.' ) );
+        }
+
+        $prompt = "Given this blog author bio:\n\n\"{$bio}\"\n\nGenerate 18 post idea seeds for the blog category \"{$topic_label}\".\n\nRequirements:\n- Each seed is a specific, concrete post idea — not generic or abstract\n- Reflects this particular person: their location, habits, references, seasonal context\n- Include local color where relevant: named places, specific activities, real details\n- Vary seed formats: observations, personal experiences, opinions, \"how I did X\", questions\n- Each seed should be 8-15 words\n- Must NOT sound like AI-generated titles: no \"The Ultimate Guide to...\", no \"X Things About Y\"\n\nReturn a valid JSON array of strings only, no explanation.";
+
+        $text = self::call_ai_raw( $provider, $api_key, $model, $prompt );
+        if ( $text === false ) {
+            wp_send_json_error( array( 'message' => 'AI request failed.' ) );
+        }
+
+        $json_text = preg_replace( '/^```(?:json)?\s*/m', '', trim( $text ) );
+        $json_text = preg_replace( '/```\s*$/m', '', $json_text );
+        $seeds     = json_decode( trim( $json_text ), true );
+
+        if ( ! is_array( $seeds ) || empty( $seeds ) ) {
+            wp_send_json_error( array( 'message' => 'Could not parse seeds from AI response.' ) );
+        }
+
+        $seeds = array_values( array_filter( array_map( 'sanitize_text_field', $seeds ) ) );
+        wp_send_json_success( array( 'seeds' => $seeds ) );
+    }
+
+    /**
+     * Make a raw AI call and return the text content string, or false on failure.
+     * Used by generate_topics and generate_seeds AJAX handlers.
+     */
+    private static function call_ai_raw( string $provider, string $api_key, string $model, string $prompt ) {
+        if ( $provider === 'claude' ) {
+            $response = wp_remote_post( 'https://api.anthropic.com/v1/messages', array(
+                'timeout' => 45,
+                'headers' => array(
+                    'x-api-key'         => $api_key,
+                    'anthropic-version' => '2023-06-01',
+                    'content-type'      => 'application/json',
+                ),
+                'body' => wp_json_encode( array(
+                    'model'      => $model,
+                    'max_tokens' => 1024,
+                    'messages'   => array( array( 'role' => 'user', 'content' => $prompt ) ),
+                ) ),
+            ) );
+            if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) return false;
+            $body = json_decode( wp_remote_retrieve_body( $response ), true );
+            return $body['content'][0]['text'] ?? false;
+        }
+
+        if ( $provider === 'openai' ) {
+            $response = wp_remote_post( 'https://api.openai.com/v1/chat/completions', array(
+                'timeout' => 45,
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . $api_key,
+                    'content-type'  => 'application/json',
+                ),
+                'body' => wp_json_encode( array(
+                    'model'      => $model,
+                    'max_tokens' => 1024,
+                    'messages'   => array( array( 'role' => 'user', 'content' => $prompt ) ),
+                ) ),
+            ) );
+            if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) return false;
+            $body = json_decode( wp_remote_retrieve_body( $response ), true );
+            return $body['choices'][0]['message']['content'] ?? false;
+        }
+
+        return false;
+    }
+
     // -------------------------------------------------------------------------
     // Topics Page
     // -------------------------------------------------------------------------
@@ -308,6 +501,13 @@ class WNI_Admin {
                                 </tr>
                             </table>
                             <label><strong>Seed Outlines</strong></label>
+                            <?php $settings = WNI_Settings::get(); ?>
+                            <?php if ( ! empty( $settings['persona_bio'] ) && $settings['ai_provider'] !== 'none' ) : ?>
+                                <button type="button" class="button wni-generate-seeds"
+                                        data-topic-label="<?php echo esc_attr( $topic['label'] ); ?>"
+                                        style="margin-bottom:6px;">Generate Seeds from Bio</button>
+                                <span class="wni-seeds-status" style="margin-left:8px; font-style:italic; font-size:12px;"></span><br>
+                            <?php endif; ?>
                             <p class="description">One seed per line. Each seed becomes a post title and shapes the body content. Example: <em>"Why I switched to X after years of using Y"</em></p>
                             <textarea name="topics[<?php echo $i; ?>][seeds_text]"
                                       rows="8" class="large-text wni-seeds-textarea"><?php
