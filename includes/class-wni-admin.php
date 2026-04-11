@@ -703,11 +703,25 @@ class WNI_Admin {
             exit;
         }
 
-        $file    = $_FILES['wni_profile_json'];
-        $ext     = strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) );
+        $file = $_FILES['wni_profile_json'];
 
+        // Extension check.
+        $ext = strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) );
         if ( $ext !== 'json' ) {
             wp_redirect( $redirect_base . '&import_error=' . urlencode( 'File must be a .json file.' ) );
+            exit;
+        }
+
+        // File size guard: 512 KB is far more than any profile needs.
+        if ( $file['size'] > 524288 ) {
+            wp_redirect( $redirect_base . '&import_error=' . urlencode( 'File is too large (max 512 KB).' ) );
+            exit;
+        }
+
+        // MIME type hint (browser-supplied, not authoritative — extension check above is the real gate).
+        $allowed_mime = array( 'application/json', 'text/plain', 'text/json', 'application/octet-stream' );
+        if ( ! empty( $file['type'] ) && ! in_array( $file['type'], $allowed_mime, true ) ) {
+            wp_redirect( $redirect_base . '&import_error=' . urlencode( 'Unexpected file type.' ) );
             exit;
         }
 
